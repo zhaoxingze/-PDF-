@@ -66,7 +66,7 @@ FONT_CONFIG = {
 # GUI配置
 GUI_CONFIG = {
     "window_title": "PDF论文翻译工具",
-    "window_size": "750x650",
+    "window_size": "900x760",
 }
 
 # 启动时加载配置

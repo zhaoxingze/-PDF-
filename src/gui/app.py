@@ -24,7 +24,20 @@ class TranslatorApp:
         self.root = tk.Tk()
         self.root.title(GUI_CONFIG["window_title"])
         self.root.geometry(GUI_CONFIG["window_size"])
+        self.root.minsize(820, 700)
         self.root.resizable(True, True)
+        self.colors = {
+            "bg": "#f5f7fb",
+            "panel": "#ffffff",
+            "panel_soft": "#eef4ff",
+            "text": "#172033",
+            "muted": "#667085",
+            "accent": "#2563eb",
+            "accent_dark": "#1d4ed8",
+            "border": "#d7deea",
+            "success": "#16803c",
+        }
+        self.root.configure(bg=self.colors["bg"])
 
         # 状态变量
         self.input_path = tk.StringVar()
@@ -48,29 +61,77 @@ class TranslatorApp:
         self.ocr_secret_var = tk.StringVar(value=API_CONFIG.get("baidu_ocr_secret_key", ""))
 
         self.queue = Queue()
+        self._setup_style()
         self._setup_ui()
         self._check_queue()
 
+    def _setup_style(self):
+        self.style = ttk.Style(self.root)
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        default_font = ("Microsoft YaHei", 10)
+        self.root.option_add("*Font", default_font)
+
+        self.style.configure("App.TFrame", background=self.colors["bg"])
+        self.style.configure("Panel.TFrame", background=self.colors["panel"])
+        self.style.configure("Soft.TFrame", background=self.colors["panel_soft"])
+        self.style.configure("TLabel", background=self.colors["panel"], foreground=self.colors["text"])
+        self.style.configure("App.TLabel", background=self.colors["bg"], foreground=self.colors["text"])
+        self.style.configure("Title.TLabel", background=self.colors["bg"], foreground=self.colors["text"], font=("Microsoft YaHei", 18, "bold"))
+        self.style.configure("Subtitle.TLabel", background=self.colors["bg"], foreground=self.colors["muted"], font=("Microsoft YaHei", 9))
+        self.style.configure("Section.TLabel", background=self.colors["panel"], foreground=self.colors["text"], font=("Microsoft YaHei", 11, "bold"))
+        self.style.configure("Muted.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("Microsoft YaHei", 9))
+        self.style.configure("Status.TLabel", background=self.colors["panel_soft"], foreground=self.colors["accent_dark"], font=("Microsoft YaHei", 9, "bold"))
+        self.style.configure("Card.TLabelframe", background=self.colors["panel"], bordercolor=self.colors["border"], relief=tk.SOLID)
+        self.style.configure("Card.TLabelframe.Label", background=self.colors["panel"], foreground=self.colors["text"], font=("Microsoft YaHei", 11, "bold"))
+        self.style.configure("TRadiobutton", background=self.colors["panel"], foreground=self.colors["text"])
+        self.style.configure("TCheckbutton", background=self.colors["panel"], foreground=self.colors["text"])
+        self.style.configure("TEntry", fieldbackground="#ffffff", bordercolor=self.colors["border"], lightcolor=self.colors["border"])
+        self.style.configure("TCombobox", fieldbackground="#ffffff", bordercolor=self.colors["border"])
+        self.style.configure("TNotebook", background=self.colors["bg"], borderwidth=0)
+        self.style.configure("TNotebook.Tab", padding=(18, 8), font=("Microsoft YaHei", 10))
+        self.style.map("TNotebook.Tab", background=[("selected", self.colors["panel"])])
+        self.style.configure("TButton", padding=(12, 7), font=("Microsoft YaHei", 10))
+        self.style.configure("Primary.TButton", padding=(18, 9), font=("Microsoft YaHei", 10, "bold"), foreground="#ffffff", background=self.colors["accent"])
+        self.style.map("Primary.TButton", background=[("active", self.colors["accent_dark"]), ("disabled", "#9db8f9")])
+        self.style.configure("Horizontal.TProgressbar", troughcolor="#e8edf6", background=self.colors["accent"], bordercolor="#e8edf6", lightcolor=self.colors["accent"], darkcolor=self.colors["accent"])
+
     def _setup_ui(self):
-        # 主容器
-        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame = ttk.Frame(self.root, padding=(18, 16), style="App.TFrame")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # 标题
-        ttk.Label(main_frame, text="PDF论文翻译工具", font=("Microsoft YaHei", 14, "bold")).pack(pady=(0, 10))
+        header = ttk.Frame(main_frame, style="App.TFrame")
+        header.pack(fill=tk.X, pady=(0, 14))
+
+        title_area = ttk.Frame(header, style="App.TFrame")
+        title_area.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(title_area, text="PDF / Word 翻译工具", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(
+            title_area,
+            text="保持文档顺序与排版，减少乱码和重复翻译",
+            style="Subtitle.TLabel",
+        ).pack(anchor=tk.W, pady=(3, 0))
+
+        status_box = ttk.Frame(header, padding=(14, 8), style="Soft.TFrame")
+        status_box.pack(side=tk.RIGHT, padx=(12, 0))
+        ttk.Label(status_box, textvariable=self.status_var, style="Status.TLabel").pack()
 
         # 创建带滚动条的画布
-        canvas = tk.Canvas(main_frame)
+        canvas = tk.Canvas(main_frame, bg=self.colors["bg"], highlightthickness=0, borderwidth=0)
         scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        scrollable_frame = ttk.Frame(canvas, style="App.TFrame")
 
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor=tk.NW)
         canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(canvas_window, width=e.width))
 
         # 绑定鼠标滚轮
         def _on_mousewheel(event):
@@ -81,39 +142,52 @@ class TranslatorApp:
         # 使用Notebook创建标签页
         self.notebook = ttk.Notebook(scrollable_frame)
         notebook = self.notebook
-        notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 14))
 
         # 翻译设置页面
-        translate_frame = ttk.Frame(notebook, padding="10")
+        translate_frame = ttk.Frame(notebook, padding=(16, 14), style="Panel.TFrame")
         notebook.add(translate_frame, text="翻译设置")
         self._setup_translate_tab(translate_frame)
 
         # OCR设置页面
-        ocr_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(ocr_frame, text="OCR设置")
-        self._setup_ocr_tab(ocr_frame)
+        self.ocr_frame = ttk.Frame(notebook, padding=(16, 14), style="Panel.TFrame")
+        notebook.add(self.ocr_frame, text="OCR设置")
+        self._setup_ocr_tab(self.ocr_frame)
+        self._on_file_type_change()
 
         # 进度和日志
-        progress_frame = ttk.Frame(scrollable_frame)
-        progress_frame.pack(fill=tk.X, pady=(0, 5))
+        progress_frame = ttk.LabelFrame(scrollable_frame, text="运行状态", padding=(14, 10), style="Card.TLabelframe")
+        progress_frame.pack(fill=tk.X, pady=(0, 12))
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill=tk.X)
-        self.status_label = ttk.Label(progress_frame, textvariable=self.status_var)
-        self.status_label.pack(anchor=tk.W, pady=(3, 0))
+        self.progress_bar.pack(fill=tk.X, pady=(0, 8))
+        self.status_label = ttk.Label(progress_frame, textvariable=self.status_var, style="Muted.TLabel")
+        self.status_label.pack(anchor=tk.W)
 
         # 日志区域
-        log_frame = ttk.LabelFrame(scrollable_frame, text="日志", padding="5")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
-        self.log_text = tk.Text(log_frame, height=6, state=tk.DISABLED)
+        log_frame = ttk.LabelFrame(scrollable_frame, text="日志", padding=(10, 8), style="Card.TLabelframe")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        self.log_text = tk.Text(
+            log_frame,
+            height=8,
+            state=tk.DISABLED,
+            bg="#101828",
+            fg="#e6edf8",
+            insertbackground="#e6edf8",
+            relief=tk.FLAT,
+            padx=10,
+            pady=8,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+        )
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=log_scrollbar.set)
         log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
         # 按钮
-        button_frame = ttk.Frame(scrollable_frame)
+        button_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
         button_frame.pack(fill=tk.X)
-        self.start_button = ttk.Button(button_frame, text="开始翻译", command=self._start_translation)
+        self.start_button = ttk.Button(button_frame, text="开始翻译", style="Primary.TButton", command=self._start_translation)
         self.start_button.pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="退出", command=self.root.quit).pack(side=tk.RIGHT, padx=5)
 
@@ -122,92 +196,76 @@ class TranslatorApp:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _setup_translate_tab(self, parent):
-        # 文件类型选择
-        ttk.Label(parent, text="文件类型", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
-        type_file_frame = ttk.Frame(parent)
-        type_file_frame.pack(fill=tk.X, pady=5)
-        ttk.Radiobutton(type_file_frame, text="PDF翻译", variable=self.file_type_var, value="pdf", command=self._on_file_type_change).pack(side=tk.LEFT, padx=(0, 20))
-        ttk.Radiobutton(type_file_frame, text="Word翻译", variable=self.file_type_var, value="docx", command=self._on_file_type_change).pack(side=tk.LEFT)
+        type_card = ttk.LabelFrame(parent, text="文档类型", padding=(14, 10), style="Card.TLabelframe")
+        type_card.pack(fill=tk.X, pady=(0, 12))
+        ttk.Radiobutton(type_card, text="PDF 翻译", variable=self.file_type_var, value="pdf", command=self._on_file_type_change).pack(side=tk.LEFT, padx=(0, 24))
+        ttk.Radiobutton(type_card, text="Word 翻译", variable=self.file_type_var, value="docx", command=self._on_file_type_change).pack(side=tk.LEFT)
 
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+        translator_card = ttk.LabelFrame(parent, text="翻译方式", padding=(14, 10), style="Card.TLabelframe")
+        translator_card.pack(fill=tk.X, pady=(0, 12))
+        translator_card.columnconfigure(0, weight=1)
+        translator_card.columnconfigure(1, weight=1)
+        translator_card.columnconfigure(2, weight=1)
+        ttk.Radiobutton(translator_card, text="Google 翻译", variable=self.translator_type_var, value="google").grid(row=0, column=0, sticky=tk.W, padx=(0, 12), pady=3)
+        ttk.Radiobutton(translator_card, text="百度翻译 API", variable=self.translator_type_var, value="baidu").grid(row=0, column=1, sticky=tk.W, padx=(0, 12), pady=3)
+        ttk.Radiobutton(translator_card, text="本地翻译模型", variable=self.translator_type_var, value="local").grid(row=0, column=2, sticky=tk.W, pady=3)
 
-        # 翻译方式选择
-        ttk.Label(parent, text="翻译方式", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
+        model_card = ttk.LabelFrame(parent, text="模型与 API", padding=(14, 10), style="Card.TLabelframe")
+        model_card.pack(fill=tk.X, pady=(0, 12))
+        model_card.columnconfigure(1, weight=1)
 
-        type_frame = ttk.Frame(parent)
-        type_frame.pack(fill=tk.X, pady=5)
-        ttk.Radiobutton(type_frame, text="Google翻译（免费，无需注册）", variable=self.translator_type_var, value="google").pack(anchor=tk.W)
-        ttk.Radiobutton(type_frame, text="百度翻译API（需要API密钥）", variable=self.translator_type_var, value="baidu").pack(anchor=tk.W)
-        ttk.Radiobutton(type_frame, text="本地翻译（需下载模型约300MB）", variable=self.translator_type_var, value="local").pack(anchor=tk.W)
+        ttk.Label(model_card, text="本地模型", style="Muted.TLabel").grid(row=0, column=0, sticky=tk.W, pady=(0, 8), padx=(0, 10))
+        model_combo = ttk.Combobox(model_card, textvariable=self.local_model_var, state="readonly")
+        model_combo["values"] = ["Helsinki-NLP/opus-mt-en-zh"]
+        model_combo.grid(row=0, column=1, sticky=tk.EW, pady=(0, 8))
 
-        # 本地模型选择
-        local_frame = ttk.LabelFrame(parent, text="本地模型设置", padding="10")
-        local_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(model_card, text="APP ID", style="Muted.TLabel").grid(row=1, column=0, sticky=tk.W, pady=(0, 8), padx=(0, 10))
+        ttk.Entry(model_card, textvariable=self.translate_app_id_var).grid(row=1, column=1, sticky=tk.EW, pady=(0, 8))
 
-        frame1 = ttk.Frame(local_frame)
-        frame1.pack(fill=tk.X, pady=3)
-        ttk.Label(frame1, text="模型:").pack(side=tk.LEFT)
-        model_combo = ttk.Combobox(frame1, textvariable=self.local_model_var, width=40, state="readonly")
-        model_combo['values'] = [
-            "Helsinki-NLP/opus-mt-en-zh",
-        ]
-        model_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(model_card, text="密钥", style="Muted.TLabel").grid(row=2, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Entry(model_card, textvariable=self.translate_secret_var, show="*").grid(row=2, column=1, sticky=tk.EW)
 
-        ttk.Label(local_frame, text="说明: 首次使用会自动下载模型，需要网络连接", font=("Microsoft YaHei", 8)).pack(anchor=tk.W)
-        ttk.Label(local_frame, text="提示: 如果有NVIDIA显卡，会自动使用GPU加速", font=("Microsoft YaHei", 8)).pack(anchor=tk.W)
+        ttk.Label(
+            model_card,
+            text="Google 可直接使用；百度需填写 API；本地模型首次运行会下载模型。",
+            style="Muted.TLabel",
+        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
-        # 百度翻译API配置
-        baidu_frame = ttk.LabelFrame(parent, text="百度翻译API设置", padding="10")
-        baidu_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(baidu_frame, text="获取方式: https://fanyi-api.baidu.com/ (标准版免费)", font=("Microsoft YaHei", 8)).pack(anchor=tk.W)
+        file_card = ttk.LabelFrame(parent, text="文件路径", padding=(14, 10), style="Card.TLabelframe")
+        file_card.pack(fill=tk.X)
+        file_card.columnconfigure(1, weight=1)
 
-        frame2 = ttk.Frame(baidu_frame)
-        frame2.pack(fill=tk.X, pady=3)
-        ttk.Label(frame2, text="APP ID:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(frame2, textvariable=self.translate_app_id_var, width=40).grid(row=0, column=1, padx=5, pady=3)
+        self.input_file_label = ttk.Label(file_card, text="输入 PDF", style="Muted.TLabel")
+        self.input_file_label.grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=(0, 8))
+        ttk.Entry(file_card, textvariable=self.input_path).grid(row=0, column=1, sticky=tk.EW, pady=(0, 8))
+        ttk.Button(file_card, text="浏览", command=self._browse_input).grid(row=0, column=2, padx=(10, 0), pady=(0, 8))
 
-        ttk.Label(frame2, text="密钥:").grid(row=1, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(frame2, textvariable=self.translate_secret_var, width=40, show="*").grid(row=1, column=1, padx=5, pady=3)
-
-        # 文件选择
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-        ttk.Label(parent, text="文件选择", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
-
-        file_frame = ttk.Frame(parent)
-        file_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Label(file_frame, text="输入PDF:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(file_frame, textvariable=self.input_path, width=50).grid(row=0, column=1, padx=5, pady=3)
-        ttk.Button(file_frame, text="浏览", command=self._browse_input).grid(row=0, column=2, pady=3)
-
-        ttk.Label(file_frame, text="输出PDF:").grid(row=1, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(file_frame, textvariable=self.output_path, width=50).grid(row=1, column=1, padx=5, pady=3)
-        ttk.Button(file_frame, text="浏览", command=self._browse_output).grid(row=1, column=2, pady=3)
+        self.output_file_label = ttk.Label(file_card, text="输出 PDF", style="Muted.TLabel")
+        self.output_file_label.grid(row=1, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Entry(file_card, textvariable=self.output_path).grid(row=1, column=1, sticky=tk.EW)
+        ttk.Button(file_card, text="浏览", command=self._browse_output).grid(row=1, column=2, padx=(10, 0))
 
     def _setup_ocr_tab(self, parent):
-        ttk.Label(parent, text="OCR设置（用于扫描版PDF）", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
-        ttk.Label(parent, text="如果PDF无法提取文本，需要启用OCR识别", font=("Microsoft YaHei", 8)).pack(anchor=tk.W)
+        intro_card = ttk.LabelFrame(parent, text="扫描版 PDF", padding=(14, 10), style="Card.TLabelframe")
+        intro_card.pack(fill=tk.X, pady=(0, 12))
+        ttk.Checkbutton(intro_card, text="启用 OCR 识别", variable=self.use_ocr_var).pack(anchor=tk.W, pady=(0, 6))
+        ttk.Label(intro_card, text="当 PDF 没有可提取文本时，OCR 会先识别图片文字再翻译。", style="Muted.TLabel").pack(anchor=tk.W)
 
-        ttk.Checkbutton(parent, text="启用OCR识别", variable=self.use_ocr_var).pack(anchor=tk.W, pady=5)
+        type_card = ttk.LabelFrame(parent, text="OCR 方式", padding=(14, 10), style="Card.TLabelframe")
+        type_card.pack(fill=tk.X, pady=(0, 12))
+        ttk.Radiobutton(type_card, text="百度 OCR API", variable=self.ocr_type_var, value="baidu").pack(side=tk.LEFT, padx=(0, 24))
+        ttk.Radiobutton(type_card, text="本地 Tesseract", variable=self.ocr_type_var, value="local").pack(side=tk.LEFT)
 
-        type_frame = ttk.Frame(parent)
-        type_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(type_frame, text="OCR方式:").pack(side=tk.LEFT)
-        ttk.Radiobutton(type_frame, text="百度OCR API", variable=self.ocr_type_var, value="baidu").pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(type_frame, text="本地Tesseract", variable=self.ocr_type_var, value="local").pack(side=tk.LEFT, padx=10)
+        api_card = ttk.LabelFrame(parent, text="百度 OCR 配置", padding=(14, 10), style="Card.TLabelframe")
+        api_card.pack(fill=tk.X, pady=(0, 12))
+        api_card.columnconfigure(1, weight=1)
+        ttk.Label(api_card, text="API Key", style="Muted.TLabel").grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=(0, 8))
+        ttk.Entry(api_card, textvariable=self.ocr_api_key_var).grid(row=0, column=1, sticky=tk.EW, pady=(0, 8))
+        ttk.Label(api_card, text="Secret Key", style="Muted.TLabel").grid(row=1, column=0, sticky=tk.W, padx=(0, 10))
+        ttk.Entry(api_card, textvariable=self.ocr_secret_var, show="*").grid(row=1, column=1, sticky=tk.EW)
+        ttk.Label(api_card, text="百度 OCR 获取地址: https://cloud.baidu.com/product/ocr", style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
-        ocr_frame = ttk.LabelFrame(parent, text="百度OCR配置", padding="10")
-        ocr_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(ocr_frame, text="获取方式: https://cloud.baidu.com/product/ocr", font=("Microsoft YaHei", 8)).pack(anchor=tk.W)
-
-        frame = ttk.Frame(ocr_frame)
-        frame.pack(fill=tk.X, pady=5)
-        ttk.Label(frame, text="API Key:").grid(row=0, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(frame, textvariable=self.ocr_api_key_var, width=40).grid(row=0, column=1, padx=5, pady=3)
-        ttk.Label(frame, text="Secret Key:").grid(row=1, column=0, sticky=tk.W, pady=3)
-        ttk.Entry(frame, textvariable=self.ocr_secret_var, width=40, show="*").grid(row=1, column=1, padx=5, pady=3)
-
-        ttk.Button(parent, text="保存所有配置", command=self._save_config).pack(anchor=tk.W, pady=10)
+        ttk.Button(parent, text="保存配置", command=self._save_config).pack(anchor=tk.W)
 
     def _log(self, message):
         self.log_text.config(state=tk.NORMAL)
@@ -232,15 +290,18 @@ class TranslatorApp:
     def _on_file_type_change(self):
         """切换文件类型时更新UI"""
         file_type = self.file_type_var.get()
+        file_label = "Word" if file_type == "docx" else "PDF"
+        if hasattr(self, "input_file_label"):
+            self.input_file_label.configure(text=f"输入 {file_label}")
+        if hasattr(self, "output_file_label"):
+            self.output_file_label.configure(text=f"输出 {file_label}")
+
         if file_type == "docx":
-            # Word翻译时隐藏OCR标签页
-            for tab_id in self.notebook.tabs():
-                if "OCR" in self.notebook.tab(tab_id, "text"):
-                    self.notebook.hide(tab_id)
+            if hasattr(self, "ocr_frame"):
+                self.notebook.hide(self.ocr_frame)
         else:
-            for tab_id in self.notebook.tabs():
-                if "OCR" in self.notebook.tab(tab_id, "text"):
-                    self.notebook.add(tab_id)
+            if hasattr(self, "ocr_frame") and str(self.ocr_frame) not in self.notebook.tabs():
+                self.notebook.add(self.ocr_frame, text="OCR设置")
 
     def _browse_input(self):
         file_type = self.file_type_var.get()
