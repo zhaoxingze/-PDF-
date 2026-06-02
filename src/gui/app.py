@@ -15,6 +15,8 @@ from src.core.pdf_reader import PDFReader
 from src.core.translator import create_translator
 from src.core.pdf_writer import PDFWriter
 from src.core.ocr import OCRFactory
+from src.core.docx_reader import DocxReader
+from src.core.docx_writer import DocxWriter
 
 
 class TranslatorApp:
@@ -31,6 +33,7 @@ class TranslatorApp:
         self.status_var = tk.StringVar(value="就绪")
 
         # 翻译方式
+        self.file_type_var = tk.StringVar(value="pdf")
         self.translator_type_var = tk.StringVar(value=API_CONFIG.get("translator_type", "local"))
         self.local_model_var = tk.StringVar(value=API_CONFIG.get("local_model", "Helsinki-NLP/opus-mt-en-zh"))
 
@@ -76,7 +79,8 @@ class TranslatorApp:
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # 使用Notebook创建标签页
-        notebook = ttk.Notebook(scrollable_frame)
+        self.notebook = ttk.Notebook(scrollable_frame)
+        notebook = self.notebook
         notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 翻译设置页面
@@ -118,6 +122,15 @@ class TranslatorApp:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _setup_translate_tab(self, parent):
+        # 文件类型选择
+        ttk.Label(parent, text="文件类型", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
+        type_file_frame = ttk.Frame(parent)
+        type_file_frame.pack(fill=tk.X, pady=5)
+        ttk.Radiobutton(type_file_frame, text="PDF翻译", variable=self.file_type_var, value="pdf", command=self._on_file_type_change).pack(side=tk.LEFT, padx=(0, 20))
+        ttk.Radiobutton(type_file_frame, text="Word翻译", variable=self.file_type_var, value="docx", command=self._on_file_type_change).pack(side=tk.LEFT)
+
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
+
         # 翻译方式选择
         ttk.Label(parent, text="翻译方式", font=("Microsoft YaHei", 10, "bold")).pack(anchor=tk.W)
 
@@ -216,20 +229,46 @@ class TranslatorApp:
         save_api_config(config)
         messagebox.showinfo("成功", "配置已保存")
 
+    def _on_file_type_change(self):
+        """切换文件类型时更新UI"""
+        file_type = self.file_type_var.get()
+        if file_type == "docx":
+            # Word翻译时隐藏OCR标签页
+            for tab_id in self.notebook.tabs():
+                if "OCR" in self.notebook.tab(tab_id, "text"):
+                    self.notebook.hide(tab_id)
+        else:
+            for tab_id in self.notebook.tabs():
+                if "OCR" in self.notebook.tab(tab_id, "text"):
+                    self.notebook.add(tab_id)
+
     def _browse_input(self):
-        path = filedialog.askopenfilename(title="选择PDF文件", filetypes=[("PDF files", "*.pdf")])
+        file_type = self.file_type_var.get()
+        if file_type == "docx":
+            path = filedialog.askopenfilename(title="选择Word文件", filetypes=[("Word files", "*.docx")])
+        else:
+            path = filedialog.askopenfilename(title="选择PDF文件", filetypes=[("PDF files", "*.pdf")])
         if path:
             self.input_path.set(path)
             base, ext = os.path.splitext(path)
             self.output_path.set(f"{base}_translated{ext}")
 
     def _browse_output(self):
-        path = filedialog.asksaveasfilename(
-            title="保存翻译后的PDF",
-            defaultextension=".pdf",
-            filetypes=[("PDF files", "*.pdf")],
-            initialfile=os.path.basename(self.output_path.get()) if self.output_path.get() else "translated.pdf"
-        )
+        file_type = self.file_type_var.get()
+        if file_type == "docx":
+            path = filedialog.asksaveasfilename(
+                title="保存翻译后的Word",
+                defaultextension=".docx",
+                filetypes=[("Word files", "*.docx")],
+                initialfile=os.path.basename(self.output_path.get()) if self.output_path.get() else "translated.docx"
+            )
+        else:
+            path = filedialog.asksaveasfilename(
+                title="保存翻译后的PDF",
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=os.path.basename(self.output_path.get()) if self.output_path.get() else "translated.pdf"
+            )
         if path:
             self.output_path.set(path)
 
@@ -237,6 +276,7 @@ class TranslatorApp:
         self._save_config()
 
         translator_type = self.translator_type_var.get()
+        file_type = self.file_type_var.get()
 
         if translator_type == "baidu":
             app_id = self.translate_app_id_var.get().strip()
@@ -245,11 +285,12 @@ class TranslatorApp:
                 messagebox.showerror("错误", "请先配置百度翻译API的APP ID和密钥")
                 return
 
+        file_label = "Word" if file_type == "docx" else "PDF"
         if not self.input_path.get():
-            messagebox.showerror("错误", "请选择输入PDF文件")
+            messagebox.showerror("错误", f"请选择输入{file_label}文件")
             return
         if not self.output_path.get():
-            messagebox.showerror("错误", "请选择输出PDF文件")
+            messagebox.showerror("错误", f"请选择输出{file_label}文件")
             return
         if not os.path.exists(self.input_path.get()):
             messagebox.showerror("错误", "输入文件不存在")
@@ -261,7 +302,10 @@ class TranslatorApp:
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
 
-        thread = threading.Thread(target=self._translate_worker, daemon=True)
+        if file_type == "docx":
+            thread = threading.Thread(target=self._translate_docx_worker, daemon=True)
+        else:
+            thread = threading.Thread(target=self._translate_worker, daemon=True)
         thread.start()
 
     def _translate_worker(self):
@@ -358,9 +402,8 @@ class TranslatorApp:
                 else:
                     blocks = reader.extract_page_blocks(page_num)
                     for block in blocks:
-                        for span in block.spans:
-                            texts.append(span.text)
-                    self.queue.put(("log", f"第{page_num + 1}页: 提取{len(texts)}段文本"))
+                        texts.append(block.merged_text)
+                    self.queue.put(("log", f"第{page_num + 1}页: 提取{len(blocks)}个文本块"))
 
                 if not texts:
                     self.queue.put(("log", f"第{page_num + 1}页: 无文本，跳过"))
@@ -404,6 +447,97 @@ class TranslatorApp:
             self.queue.put(("progress", 100))
             self.queue.put(("log", f"\n翻译完成! {total_texts}段, 失败{failed_texts}, 耗时{elapsed:.1f}秒"))
             self.queue.put(("complete", f"翻译完成！\n\n翻译: {total_texts}段\n失败: {failed_texts}\n耗时: {elapsed:.1f}秒\n\n输出: {output_path}"))
+
+        except Exception as e:
+            error_detail = traceback.format_exc()
+            self.queue.put(("log", f"错误: {str(e)}"))
+            self.queue.put(("log", error_detail))
+            self.queue.put(("error", f"翻译失败: {str(e)}"))
+
+    def _translate_docx_worker(self):
+        """Word文档翻译工作线程"""
+        try:
+            input_path = self.input_path.get()
+            output_path = self.output_path.get()
+            translator_type = self.translator_type_var.get()
+
+            self.queue.put(("log", f"输入: {input_path}"))
+            self.queue.put(("log", f"输出: {output_path}"))
+            self.queue.put(("log", f"翻译方式: {translator_type}"))
+
+            # 加载Word文档
+            self.queue.put(("status", "正在加载Word文档..."))
+            reader = DocxReader(input_path)
+            paragraphs = reader.extract_paragraphs()
+            total_paragraphs = len(paragraphs)
+            self.queue.put(("log", f"Word文档共 {total_paragraphs} 个段落"))
+
+            if total_paragraphs == 0:
+                self.queue.put(("error", "文档中没有可翻译的文本"))
+                return
+
+            # 初始化翻译器
+            self.queue.put(("status", "正在初始化翻译..."))
+            if translator_type == "baidu":
+                app_id = self.translate_app_id_var.get().strip()
+                secret_key = self.translate_secret_var.get().strip()
+                translator = create_translator("baidu", app_id=app_id, secret_key=secret_key)
+            elif translator_type == "local":
+                model_name = self.local_model_var.get()
+                translator = create_translator("local", model_name=model_name)
+                self.queue.put(("log", f"本地模型: {model_name}"))
+                self.queue.put(("log", "首次使用需要下载模型，请稍候..."))
+            else:
+                translator = create_translator("google")
+                self.queue.put(("log", "使用Google翻译"))
+
+            # 测试翻译
+            self.queue.put(("log", "测试翻译..."))
+            test_result = translator.test_connection()
+            self.queue.put(("log", f"测试结果: {test_result}"))
+            if test_result.startswith("["):
+                error_msg = (
+                    f"翻译测试失败: {test_result}\n\n"
+                    "解决方案：\n"
+                    "1. 检查网络连接\n"
+                    "2. 尝试使用VPN/代理\n"
+                    "3. 切换到其他翻译方式"
+                )
+                self.queue.put(("error", error_msg))
+                return
+            self.queue.put(("log", f"翻译正常: Hello -> {test_result}"))
+
+            # 提取文本
+            texts = [p.text for p in paragraphs]
+            start_time = time.time()
+
+            # 显示前3段原文
+            for i, t in enumerate(texts[:3]):
+                self.queue.put(("log", f"  原文{i+1}: {t[:50]}..."))
+
+            # 分批翻译
+            self.queue.put(("status", f"翻译中... 共{total_paragraphs}段"))
+            translated = translator.translate_batch(texts)
+
+            # 统计失败
+            failed = sum(1 for t in translated if t.startswith("["))
+
+            # 显示前3段译文
+            for i, t in enumerate(translated[:3]):
+                if t and not t.startswith("["):
+                    self.queue.put(("log", f"  译文{i+1}: {t[:50]}..."))
+
+            # 写入
+            self.queue.put(("status", "正在写入Word文档..."))
+            writer = DocxWriter(input_path)
+            writer.replace_paragraphs(paragraphs, translated)
+            writer.save(output_path)
+            self.queue.put(("log", f"文件已保存: {output_path}"))
+
+            elapsed = time.time() - start_time
+            self.queue.put(("progress", 100))
+            self.queue.put(("log", f"\n翻译完成! {total_paragraphs}段, 失败{failed}, 耗时{elapsed:.1f}秒"))
+            self.queue.put(("complete", f"翻译完成！\n\n翻译: {total_paragraphs}段\n失败: {failed}\n耗时: {elapsed:.1f}秒\n\n输出: {output_path}"))
 
         except Exception as e:
             error_detail = traceback.format_exc()

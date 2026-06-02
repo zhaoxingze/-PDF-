@@ -1,9 +1,46 @@
 import hashlib
 import random
+import re
 import time
 from typing import List, Callable, Optional
 import requests
 import json
+
+
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def normalize_text_for_translation(text: str) -> str:
+    """Normalize extracted text before sending it to a translator."""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def should_translate_text(text: str) -> bool:
+    """Return True only for likely English text that needs zh-CN translation."""
+    stripped = normalize_text_for_translation(text)
+    if len(stripped) <= 1 or stripped.isdigit() or stripped.startswith("["):
+        return False
+
+    latin_count = len(_LATIN_RE.findall(stripped))
+    cjk_count = len(_CJK_RE.findall(stripped))
+    if latin_count < 2:
+        return False
+    if cjk_count and cjk_count >= latin_count:
+        return False
+
+    alnum_count = sum(ch.isalnum() for ch in stripped)
+    return alnum_count >= 2
+
+
+def unique_translatable_items(texts: List[str]):
+    """Return unique normalized texts with the original indexes that use them."""
+    grouped = {}
+    for i, text in enumerate(texts):
+        normalized = normalize_text_for_translation(text)
+        if should_translate_text(normalized):
+            grouped.setdefault(normalized, []).append(i)
+    return list(grouped.items())
 
 
 class BaiduTranslator:
@@ -79,15 +116,10 @@ class BaiduTranslator:
         total = len(texts)
         translations = [""] * total
 
-        # 过滤有效文本
-        valid_items = []
-        for i, text in enumerate(texts):
-            stripped = text.strip()
-            if stripped and len(stripped) > 1 and not stripped.isdigit():
-                valid_items.append((i, stripped))
+        valid_items = unique_translatable_items(texts)
 
         # 逐条翻译
-        for idx, (orig_idx, text) in enumerate(valid_items):
+        for idx, (text, original_indexes) in enumerate(valid_items):
             # 频率限制
             time.sleep(1.0)
 
@@ -108,14 +140,17 @@ class BaiduTranslator:
                 result = response.json()
 
                 if "trans_result" in result:
-                    translations[orig_idx] = result["trans_result"][0]["dst"]
+                    translated = result["trans_result"][0]["dst"]
                 elif "error_code" in result:
-                    translations[orig_idx] = f"[{self._get_error_msg(result['error_code'])}]"
+                    translated = f"[{self._get_error_msg(result['error_code'])}]"
                 else:
-                    translations[orig_idx] = "[翻译失败]"
+                    translated = "[翻译失败]"
 
             except Exception as e:
-                translations[orig_idx] = "[网络错误]"
+                translated = "[网络错误]"
+
+            for orig_idx in original_indexes:
+                translations[orig_idx] = translated
 
         return translations
 
@@ -238,12 +273,7 @@ class LocalTranslator:
         total = len(texts)
         translations = [""] * total
 
-        # 过滤有效文本
-        valid_items = []
-        for i, text in enumerate(texts):
-            stripped = text.strip()
-            if stripped and len(stripped) > 1:
-                valid_items.append((i, stripped))
+        valid_items = unique_translatable_items(texts)
 
         # GPU使用更大批量
         if self.device == "cuda":
@@ -252,7 +282,7 @@ class LocalTranslator:
         # 批量翻译
         for batch_start in range(0, len(valid_items), batch_size):
             batch_items = valid_items[batch_start:batch_start + batch_size]
-            batch_texts = [text for _, text in batch_items]
+            batch_texts = [text for text, _ in batch_items]
 
             inputs = self.tokenizer(
                 batch_texts,
@@ -272,8 +302,9 @@ class LocalTranslator:
 
             translated = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-            for (orig_idx, _), trans in zip(batch_items, translated):
-                translations[orig_idx] = trans
+            for (_, original_indexes), trans in zip(batch_items, translated):
+                for orig_idx in original_indexes:
+                    translations[orig_idx] = trans
 
         return translations
 
@@ -319,56 +350,15 @@ class GoogleTranslator:
         total = len(texts)
         translations = [""] * total
 
-        # 过滤有效文本
-        valid_items = []
-        for i, text in enumerate(texts):
-            stripped = text.strip()
-            if stripped and len(stripped) > 1 and not stripped.isdigit():
-                valid_items.append((i, stripped))
+        valid_items = unique_translatable_items(texts)
 
-        # 批量翻译（合并文本以减少请求）
-        batch_texts = []
-        batch_indices = []
-
-        for idx, (orig_idx, text) in enumerate(valid_items):
-            batch_texts.append(text)
-            batch_indices.append(orig_idx)
-
-            # 每10条或最后一条时发送请求
-            if len(batch_texts) >= batch_size or idx == len(valid_items) - 1:
-                combined = "\n".join(batch_texts)
-                params = {
-                    "client": "gtx",
-                    "sl": "en",
-                    "tl": "zh-CN",
-                    "dt": "t",
-                    "q": combined,
-                }
-
-                try:
-                    response = requests.get(self.api_url, params=params, timeout=15)
-                    result = response.json()
-
-                    if result and len(result) > 0 and len(result[0]) > 0:
-                        translated_parts = [item[0] for item in result[0] if item[0]]
-                        # 按行分割翻译结果
-                        if len(translated_parts) == len(batch_texts):
-                            for i, trans in enumerate(translated_parts):
-                                translations[batch_indices[i]] = trans
-                        else:
-                            # 如果分割失败，整体分配
-                            combined_trans = "".join(translated_parts)
-                            for i, orig_idx in enumerate(batch_indices):
-                                translations[orig_idx] = combined_trans
-
-                    time.sleep(0.5)  # 避免请求过快
-
-                except Exception as e:
-                    for orig_idx in batch_indices:
-                        translations[orig_idx] = "[网络错误]"
-
-                batch_texts = []
-                batch_indices = []
+        # 逐条翻译，避免批量合并导致的对齐错乱和重复翻译
+        for idx, (text, original_indexes) in enumerate(valid_items):
+            translated = self.translate_single(text)
+            for orig_idx in original_indexes:
+                translations[orig_idx] = translated
+            if idx > 0 and idx % 5 == 0:
+                time.sleep(0.3)
 
         return translations
 
