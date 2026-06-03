@@ -1,8 +1,35 @@
 import os
 import json
+import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(BASE_DIR, "api_config.json")
+APP_NAME = "PDF论文翻译工具"
+
+
+def is_frozen_app():
+    """Return True when running from a PyInstaller executable."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def resource_path(relative_path):
+    """Resolve bundled resources in source and PyInstaller builds."""
+    if is_frozen_app() and hasattr(sys, "_MEIPASS"):
+        base_dir = sys._MEIPASS
+    else:
+        base_dir = BASE_DIR
+    return os.path.join(base_dir, relative_path)
+
+
+def get_config_dir():
+    """Use AppData for installed builds and the project folder for source runs."""
+    if is_frozen_app():
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            return os.path.join(local_appdata, APP_NAME)
+    return BASE_DIR
+
+
+CONFIG_FILE = os.path.join(get_config_dir(), "api_config.json")
 
 # API配置
 API_CONFIG = {
@@ -32,6 +59,7 @@ def save_api_config(config):
     """保存API配置"""
     global API_CONFIG
     API_CONFIG.update(config)
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(API_CONFIG, f, ensure_ascii=False, indent=2)
 
@@ -59,7 +87,7 @@ def get_ocr_config():
 
 # 字体配置
 FONT_CONFIG = {
-    "default_font": os.path.join(BASE_DIR, "fonts", "NotoSansSC-Regular.ttf"),
+    "default_font": resource_path(os.path.join("fonts", "NotoSansSC-Regular.ttf")),
     "fallback_font": "china-s",
 }
 

@@ -36,6 +36,23 @@ python main.py
 
 或直接双击 `run.cmd`
 
+### 生成可安装软件
+
+在项目根目录运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
+```
+
+构建完成后会生成：
+
+- `dist\PDFTranslator.exe`：打包后的单文件主程序，可直接放到桌面运行
+- `dist\installer\PDFTranslatorSetup-1.0.0.exe`：可发送给别人的安装包
+
+安装包会安装到当前用户目录，并自动创建桌面快捷方式 `PDF Translator` 和开始菜单入口。
+
+> 注意：安装包默认包含 `requirements.txt` 中的依赖，适合 Google 翻译、百度翻译 API、PDF/Word 翻译和 OCR API。`torch`/`transformers` 本地模型依赖体积很大，当前未打入安装包。
+
 ### 操作流程
 
 1. 选择翻译方式（Google翻译/百度翻译API/本地翻译）

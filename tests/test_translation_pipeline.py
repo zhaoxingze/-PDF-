@@ -1,10 +1,14 @@
 import unittest
 import uuid
+import importlib
+import os
+import sys
 from pathlib import Path
 
 import fitz
 from docx import Document
 
+import config as app_config
 from src.core.docx_reader import DocxReader
 from src.core.docx_writer import DocxWriter
 from src.core.pdf_reader import PDFReader
@@ -114,6 +118,52 @@ class TranslationPipelineTests(unittest.TestCase):
             self.assertIn("\u4e2d\u6587\u8bd1\u6587", out[0].get_text())
         finally:
             out.close()
+
+
+class ConfigPathTests(unittest.TestCase):
+    def setUp(self):
+        self._old_frozen = getattr(sys, "frozen", None)
+        self._old_meipass = getattr(sys, "_MEIPASS", None)
+        self._old_localappdata = os.environ.get("LOCALAPPDATA")
+
+    def tearDown(self):
+        if self._old_frozen is None:
+            if hasattr(sys, "frozen"):
+                delattr(sys, "frozen")
+        else:
+            sys.frozen = self._old_frozen
+
+        if self._old_meipass is None:
+            if hasattr(sys, "_MEIPASS"):
+                delattr(sys, "_MEIPASS")
+        else:
+            sys._MEIPASS = self._old_meipass
+
+        if self._old_localappdata is None:
+            os.environ.pop("LOCALAPPDATA", None)
+        else:
+            os.environ["LOCALAPPDATA"] = self._old_localappdata
+
+        importlib.reload(app_config)
+
+    def test_resource_path_uses_pyinstaller_bundle_directory_when_frozen(self):
+        sys.frozen = True
+        sys._MEIPASS = str(test_path("bundle"))
+
+        expected = Path(sys._MEIPASS) / "fonts" / "NotoSansSC-Regular.ttf"
+
+        self.assertEqual(Path(app_config.resource_path("fonts/NotoSansSC-Regular.ttf")), expected)
+
+    def test_config_file_uses_local_appdata_when_frozen(self):
+        sys.frozen = True
+        sys._MEIPASS = str(test_path("bundle"))
+        local_appdata = test_path("localappdata")
+        os.environ["LOCALAPPDATA"] = str(local_appdata)
+
+        reloaded = importlib.reload(app_config)
+
+        expected = local_appdata / reloaded.APP_NAME / "api_config.json"
+        self.assertEqual(Path(reloaded.CONFIG_FILE), expected)
 
 
 if __name__ == "__main__":
